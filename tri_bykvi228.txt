@@ -2,7 +2,6 @@
 #announce: Не работает подписка, обнови ее на две стрелочки
 #support-url: https://t.me/nzea_tri_bykvi
 #profile-update-interval: 3
-#subscription-userinfo: upload=0; download=12884901888; total=536870912000; expire=0
 #profile-locked: true
 #profile-type: encrypted
 #profile-locked: true
