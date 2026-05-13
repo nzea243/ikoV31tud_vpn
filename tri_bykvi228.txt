@@ -8,7 +8,6 @@
 #profile-locked: true
 #hide-settings: 1
 vless://info@0.0.0.0:443?type=tcp&security=none#для wifi и моб инет без бс
-vless://info@0.0.0.0:443?type=tcp&security=none#───────────────────────────────
 
 vless://796fa507-68d8-4733-b45b-fc16bcff0603@srv35.datatowers.net:443?security=reality&encryption=none&pbk=Ufkz__Q3m_d8NFR08OVtXx3hLaV4-x7UesrVKduEIn0&headerType=&fp=chrome&type=tcp&flow=xtls-rprx-vision&sni=srv35.datatowers.net#🇷🇺 wifi @ikoV31tud
 vless://443be09e-896a-4257-b60e-143c68f713f9@3.70.72.166:57942?security=reality&encryption=none&pbk=Sfq7XvYQcbDod2_WbncXkps0GCc3smquLk8Rtudx_h4&headerType=&fp=firefox&spx=%2F&type=tcp&flow=xtls-rprx-vision&sni=yahoo.com&sid=4f4e67ca#🇩🇪 (ai) wifi @ikoV31tud
