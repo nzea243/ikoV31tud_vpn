@@ -3,7 +3,7 @@ import requests
 import random
 import base64
 import re
-from urllib.parse import unquote, quote
+from urllib.parse import unquote, quote, urlparse
 
 # ─── Заголовок файла (не трогать) ────────────────────────────────────────────
 HEADER = """\
@@ -19,15 +19,11 @@ HEADER = """\
 SEPARATOR_WIFI   = "vless://info@0.0.0.0:443?type=tcp&security=none#для wifi и моб инет без бс👇"
 SEPARATOR_BYPASS = "vless://info@0.0.0.0:443?type=tcp&security=none#для обхода бс👇"
 
-# ─── Источники ────────────────────────────────────────────────────────────────
 WIFI_SOURCES = [
     "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/refs/heads/main/githubmirror/new/all_new.txt",
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS.txt",
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_SS+All_RUS.txt",
     "https://raw.githubusercontent.com/nzea243/okak/refs/heads/main/sub.txt",
-    "https://mifa.world/hysteria",
-    "https://mifa.world/vless",
-    "https://mifa.world/other",
 ]
 
 BYPASS_SOURCES = [
@@ -45,242 +41,148 @@ BYPASS_SOURCES = [
 
 VALID_PREFIXES = ('vless://', 'vmess://', 'trojan://', 'ss://', 'ssr://', 'hysteria2://', 'hy2://', 'tuic://')
 
-# ─── Флаги стран ──────────────────────────────────────────────────────────────
-FLAG_RE = re.compile(r'[\U0001F1E0-\U0001F1FF]{2}')
-RUSSIAN_FLAG = '🇷🇺'
+# ─── База стран ───────────────────────────────────────────────────────────────
+# Маппинг: всё что распознаём → (код ISO, флаг)
+def _flag(cc):
+    return ''.join(chr(0x1F1E6 + ord(c) - ord('A')) for c in cc.upper())
 
-# Расширенные паттерны для России
-RU_PATTERNS = [
-    r'\b(ru|rus|russia|россия|рус|рф|мск|москва|spb|питер|петербург|saint-petersburg)\b',
-    r'[._-](ru|rus|russia)[._-]?',
-    r'\.ru\b',
-    r'\b(russian)\b',
-]
-RUSSIAN_TEXT_RE = re.compile('|'.join(RU_PATTERNS), re.IGNORECASE)
+# Список: (паттерн для поиска, код страны)
+# Порядок важен — более специфичные паттерны раньше
+COUNTRY_PATTERNS: list[tuple[re.Pattern, str]] = []
 
-# Карта городов → код страны
-CITY_TO_CC = {
-    # Германия
-    'frankfurt': 'DE', 'fra': 'DE', 'de-fra': 'DE', 'berlin': 'DE', 'munich': 'DE', 'munchen': 'DE', 'hamburg': 'DE',
-    # Нидерланды
-    'amsterdam': 'NL', 'ams': 'NL', 'nl-ams': 'NL', 'rotterdam': 'NL',
-    # Великобритания
-    'london': 'GB', 'lon': 'GB', 'gb-lon': 'GB', 'manchester': 'GB', 'uk': 'GB', 'england': 'GB',
-    # США
-    'new-york': 'US', 'ny': 'US', 'us-ny': 'US', 'nyc': 'US', 'los-angeles': 'US', 'la': 'US',
-    'chicago': 'US', 'miami': 'US', 'dallas': 'US', 'seattle': 'US', 'atlanta': 'US', 'silicon': 'US',
-    'san-francisco': 'US', 'sf': 'US', 'phoenix': 'US', 'denver': 'US', 'usa': 'US', 'america': 'US',
-    'united-states': 'US', 'us': 'US',
-    # Финляндия
-    'helsinki': 'FI', 'hel': 'FI', 'fi-hel': 'FI',
-    # Швеция
-    'stockholm': 'SE', 'se-sto': 'SE',
-    # Норвегия
-    'oslo': 'NO', 'norway': 'NO',
-    # Польша
-    'warsaw': 'PL', 'pl-waw': 'PL', 'krakow': 'PL',
-    # Чехия
-    'prague': 'CZ', 'cz-prg': 'CZ',
-    # Австрия
-    'vienna': 'AT', 'at-vie': 'AT',
-    # Швейцария
-    'zurich': 'CH', 'ch-zrh': 'CH', 'geneva': 'CH',
-    # Дания
-    'copenhagen': 'DK',
-    # Испания
-    'madrid': 'ES', 'barcelona': 'ES', 'es-mad': 'ES',
-    # Италия
-    'milan': 'IT', 'it-mil': 'IT', 'rome': 'IT',
-    # Португалия
-    'lisbon': 'PT', 'portugal': 'PT',
-    # Венгрия
-    'budapest': 'HU',
-    # Румыния
-    'bucharest': 'RO', 'ro-buh': 'RO',
-    # Болгария
-    'sofia': 'BG',
-    # Турция
-    'istanbul': 'TR', 'tr-ist': 'TR', 'turkey': 'TR', 'ankara': 'TR',
-    # Украина
-    'kyiv': 'UA', 'kiev': 'UA', 'ua-iev': 'UA', 'kharkiv': 'UA', 'odesa': 'UA', 'odessa': 'UA',
-    # Беларусь
-    'minsk': 'BY',
-    # Казахстан
-    'almaty': 'KZ', 'kz-ala': 'KZ', 'astana': 'KZ', 'nur-sultan': 'KZ', 'kazakhstan': 'KZ',
-    # Азербайджан
-    'baku': 'AZ',
-    # Грузия
-    'tbilisi': 'GE', 'ge-tbs': 'GE',
-    # Армения
-    'yerevan': 'AM',
-    # Молдова
-    'chisinau': 'MD',
-    # Литва
-    'vilnius': 'LT',
-    # Латвия
-    'riga': 'LV',
-    # Эстония
-    'tallinn': 'EE',
-    # Словакия
-    'bratislava': 'SK',
-    # Словения
-    'ljubljana': 'SI',
-    # Хорватия
-    'zagreb': 'HR',
-    # Сербия
-    'belgrade': 'RS',
-    # Япония
-    'tokyo': 'JP', 'jp-tyo': 'JP', 'osaka': 'JP', 'japan': 'JP',
-    # Корея
-    'seoul': 'KR', 'kr-seo': 'KR', 'korea': 'KR',
-    # Китай/Азия
-    'hong-kong': 'HK', 'hk': 'HK', 'hk-hkg': 'HK', 'taiwan': 'TW', 'taipei': 'TW', 'tw-tpe': 'TW',
-    'singapore': 'SG', 'sg-sin': 'SG', 'sg': 'SG', 'malaysia': 'MY', 'kuala-lumpur': 'MY',
-    'indonesia': 'ID', 'jakarta': 'ID', 'thailand': 'TH', 'bangkok': 'TH', 'th-bkk': 'TH',
-    'vietnam': 'VN', 'hanoi': 'VN', 'ho-chi-minh': 'VN',
-    'india': 'IN', 'mumbai': 'IN', 'in-bom': 'IN', 'delhi': 'IN',
-    'philippines': 'PH', 'manila': 'PH',
-    # Израиль
-    'tel-aviv': 'IL', 'israel': 'IL',
-    # ОАЭ
-    'dubai': 'AE', 'ae-dxb': 'AE', 'uae': 'AE', 'emirates': 'AE',
-    # Саудовская Аравия
-    'saudi': 'SA', 'riyadh': 'SA',
-    # Катар
-    'qatar': 'QA', 'doha': 'QA',
-    # Кувейт
-    'kuwait': 'KW',
-    # Канада
-    'canada': 'CA', 'toronto': 'CA', 'ca-yyz': 'CA', 'vancouver': 'CA', 'montreal': 'CA',
-    # Мексика
-    'mexico': 'MX',
-    # Бразилия
-    'brazil': 'BR', 'sao-paulo': 'BR', 'br-gru': 'BR',
-    # Аргентина
-    'argentina': 'AR', 'buenos-aires': 'AR',
-    # Чили
-    'chile': 'CL', 'santiago': 'CL',
-    # Колумбия
-    'colombia': 'CO', 'bogota': 'CO',
-    # Австралия
-    'australia': 'AU', 'sydney': 'AU', 'au-syd': 'AU', 'melbourne': 'AU',
-    # Новая Зеландия
-    'new-zealand': 'NZ', 'auckland': 'NZ',
-    # Франция
-    'france': 'FR', 'paris': 'FR', 'fr-par': 'FR',
-    # Ирландия
-    'ireland': 'IE', 'dublin': 'IE',
-    # Исландия
-    'iceland': 'IS', 'reykjavik': 'IS',
-    # Люксембург
-    'luxembourg': 'LU',
-    # Мальта
-    'malta': 'MT',
-    # Кипр
-    'cyprus': 'CY', 'nicosia': 'CY',
-    # Греция
-    'greece': 'GR', 'athens': 'GR',
-    # ЮАР
-    'south-africa': 'ZA', 'johannesburg': 'ZA', 'za-jnb': 'ZA',
-    # Нигерия
-    'nigeria': 'NG', 'lagos': 'NG',
-    # Кения
-    'kenya': 'KE', 'nairobi': 'KE',
-    # Египет
-    'egypt': 'EG', 'cairo': 'EG',
-    # Иран
-    'iran': 'IR', 'tehran': 'IR',
-    # Пакистан
-    'pakistan': 'PK', 'karachi': 'PK',
-    # Бангладеш
-    'bangladesh': 'BD', 'dhaka': 'BD',
-    # Шри-Ланка
-    'sri-lanka': 'LK', 'colombo': 'LK',
-    # Монголия
-    'mongolia': 'MN', 'ulaanbaatar': 'MN',
-    # Узбекистан
-    'uzbekistan': 'UZ', 'tashkent': 'UZ',
-    # Киргизия
-    'kyrgyzstan': 'KG', 'bishkek': 'KG',
+_NAMES = [
     # Россия
-    'moscow': 'RU', 'msk': 'RU', 'saint-petersburg': 'RU', 'petersburg': 'RU',
-    'novosibirsk': 'RU', 'yekaterinburg': 'RU', 'kazan': 'RU', 'nn': 'RU',
-    'rostov': 'RU', 'samara': 'RU', 'ufa': 'RU', 'krasnoyarsk': 'RU',
-    'voronezh': 'RU', 'volgograd': 'RU', 'perm': 'RU',
-}
+    ('RU', ['🇷🇺', 'Russia', 'Россия', 'RUS', r'\bRU\b']),
+    # СНГ и ближнее зарубежье
+    ('UA', ['🇺🇦', 'Ukraine', 'Украина', r'\bUA\b']),
+    ('BY', ['🇧🇾', 'Belarus', 'Беларусь', r'\bBY\b']),
+    ('KZ', ['🇰🇿', 'Kazakhstan', 'Казахстан', r'\bKZ\b']),
+    ('UZ', ['🇺🇿', 'Uzbekistan', 'Узбекистан', r'\bUZ\b']),
+    ('AZ', ['🇦🇿', 'Azerbaijan', r'\bAZ\b']),
+    ('GE', ['🇬🇪', 'Georgia', r'\bGE\b']),
+    ('AM', ['🇦🇲', 'Armenia', r'\bAM\b']),
+    ('MD', ['🇲🇩', 'Moldova', r'\bMD\b']),
+    ('KG', ['🇰🇬', 'Kyrgyzstan', r'\bKG\b']),
+    ('TJ', ['🇹🇯', 'Tajikistan', r'\bTJ\b']),
+    ('TM', ['🇹🇲', 'Turkmenistan', r'\bTM\b']),
+    # Европа
+    ('DE', ['🇩🇪', 'Germany', 'Deutschland', 'Германия', r'\bDE\b']),
+    ('FR', ['🇫🇷', 'France', 'Франция', r'\bFR\b']),
+    ('GB', ['🇬🇧', 'United Kingdom', 'UK', 'Britain', r'\bGB\b']),
+    ('NL', ['🇳🇱', 'Netherlands', 'Holland', r'\bNL\b']),
+    ('FI', ['🇫🇮', 'Finland', r'\bFI\b']),
+    ('SE', ['🇸🇪', 'Sweden', r'\bSE\b']),
+    ('NO', ['🇳🇴', 'Norway', r'\bNO\b']),
+    ('PL', ['🇵🇱', 'Poland', r'\bPL\b']),
+    ('CZ', ['🇨🇿', 'Czech', r'\bCZ\b']),
+    ('AT', ['🇦🇹', 'Austria', r'\bAT\b']),
+    ('CH', ['🇨🇭', 'Switzerland', r'\bCH\b']),
+    ('BE', ['🇧🇪', 'Belgium', r'\bBE\b']),
+    ('DK', ['🇩🇰', 'Denmark', r'\bDK\b']),
+    ('ES', ['🇪🇸', 'Spain', r'\bES\b']),
+    ('IT', ['🇮🇹', 'Italy', r'\bIT\b']),
+    ('PT', ['🇵🇹', 'Portugal', r'\bPT\b']),
+    ('HU', ['🇭🇺', 'Hungary', r'\bHU\b']),
+    ('RO', ['🇷🇴', 'Romania', r'\bRO\b']),
+    ('BG', ['🇧🇬', 'Bulgaria', r'\bBG\b']),
+    ('TR', ['🇹🇷', 'Turkey', 'Турция', r'\bTR\b']),
+    ('LT', ['🇱🇹', 'Lithuania', r'\bLT\b']),
+    ('LV', ['🇱🇻', 'Latvia', r'\bLV\b']),
+    ('EE', ['🇪🇪', 'Estonia', r'\bEE\b']),
+    ('SK', ['🇸🇰', 'Slovakia', r'\bSK\b']),
+    ('SI', ['🇸🇮', 'Slovenia', r'\bSI\b']),
+    ('HR', ['🇭🇷', 'Croatia', r'\bHR\b']),
+    ('RS', ['🇷🇸', 'Serbia', r'\bRS\b']),
+    ('AL', ['🇦🇱', 'Albania', r'\bAL\b']),
+    ('ME', ['🇲🇪', 'Montenegro', r'\bME\b']),
+    ('MK', ['🇲🇰', 'Macedonia', r'\bMK\b']),
+    ('IS', ['🇮🇸', 'Iceland', r'\bIS\b']),
+    ('LU', ['🇱🇺', 'Luxembourg', r'\bLU\b']),
+    ('MT', ['🇲🇹', 'Malta', r'\bMT\b']),
+    ('CY', ['🇨🇾', 'Cyprus', r'\bCY\b']),
+    # Азия
+    ('JP', ['🇯🇵', 'Japan', 'Япония', r'\bJP\b']),
+    ('KR', ['🇰🇷', 'Korea', r'\bKR\b']),
+    ('CN', ['🇨🇳', 'China', 'Китай', r'\bCN\b']),
+    ('HK', ['🇭🇰', 'Hong Kong', r'\bHK\b']),
+    ('TW', ['🇹🇼', 'Taiwan', r'\bTW\b']),
+    ('SG', ['🇸🇬', 'Singapore', r'\bSG\b']),
+    ('MY', ['🇲🇾', 'Malaysia', r'\bMY\b']),
+    ('ID', ['🇮🇩', 'Indonesia', r'\bID\b']),
+    ('TH', ['🇹🇭', 'Thailand', r'\bTH\b']),
+    ('VN', ['🇻🇳', 'Vietnam', r'\bVN\b']),
+    ('IN', ['🇮🇳', 'India', r'\bIN\b']),
+    ('PK', ['🇵🇰', 'Pakistan', r'\bPK\b']),
+    ('BD', ['🇧🇩', 'Bangladesh', r'\bBD\b']),
+    ('MN', ['🇲🇳', 'Mongolia', r'\bMN\b']),
+    # Ближний Восток
+    ('AE', ['🇦🇪', 'Emirates', 'UAE', r'\bAE\b']),
+    ('SA', ['🇸🇦', 'Saudi', r'\bSA\b']),
+    ('TR', ['🇹🇷', 'Turkey', r'\bTR\b']),
+    ('IL', ['🇮🇱', 'Israel', r'\bIL\b']),
+    ('IR', ['🇮🇷', 'Iran', r'\bIR\b']),
+    ('IQ', ['🇮🇶', 'Iraq', r'\bIQ\b']),
+    # Африка
+    ('ZA', ['🇿🇦', 'South Africa', r'\bZA\b']),
+    ('NG', ['🇳🇬', 'Nigeria', r'\bNG\b']),
+    ('EG', ['🇪🇬', 'Egypt', r'\bEG\b']),
+    # Америка
+    ('US', ['🇺🇸', 'United States', 'USA', r'\bUS\b']),
+    ('CA', ['🇨🇦', 'Canada', r'\bCA\b']),
+    ('MX', ['🇲🇽', 'Mexico', r'\bMX\b']),
+    ('BR', ['🇧🇷', 'Brazil', r'\bBR\b']),
+    ('AR', ['🇦🇷', 'Argentina', r'\bAR\b']),
+    ('CL', ['🇨🇱', 'Chile', r'\bCL\b']),
+    ('CO', ['🇨🇴', 'Colombia', r'\bCO\b']),
+    # Океания
+    ('AU', ['🇦🇺', 'Australia', r'\bAU\b']),
+    ('NZ', ['🇳🇿', 'New Zealand', r'\bNZ\b']),
+]
 
-# Двухбуквенные коды стран
-KNOWN_CC = {
-    'US','DE','FR','GB','NL','FI','SE','NO','PL','CZ','AT','BE','CH','DK',
-    'ES','IT','PT','HU','RO','BG','TR','UA','BY','KZ','AZ','GE','AM','MD',
-    'LT','LV','EE','SK','SI','HR','RS','MK','BA','AL','ME','JP','KR','CN',
-    'HK','TW','SG','MY','ID','TH','VN','IN','PK','BD','LK','NP','MN',
-    'KG','TJ','TM','UZ','IL','AE','SA','QA','KW','BH','OM','JO','LB',
-    'IR','IQ','EG','ZA','NG','KE','GH','ET','TZ','MA','DZ','TN',
-    'CA','MX','BR','AR','CL','CO','PE','VE','AU','NZ','RU',
-    'IE','IS','LU','MT','CY','GR','PH','LA','KH','MM',
-}
+# Строим скомпилированный список паттернов
+_FLAG_RE = re.compile(r'[\U0001F1E6-\U0001F1FF]{2}')
+_BUILT_PATTERNS: list[tuple[re.Pattern, str, str]] = []  # (pattern, cc, flag)
+for cc, aliases in _NAMES:
+    flag = _flag(cc)
+    for alias in aliases:
+        # Флаг-эмодзи — ищем напрямую
+        if any(ord(c) > 127 for c in alias):
+            try:
+                _BUILT_PATTERNS.append((re.compile(re.escape(alias)), cc, flag))
+            except re.error:
+                pass
+        # Двухбуквенный код вида \bXX\b — только UPPERCASE, без IGNORECASE
+        elif re.fullmatch(r'\\b[A-Z]{2}\\b', alias):
+            _BUILT_PATTERNS.append((re.compile(alias), cc, flag))
+        # Полное название страны — case-insensitive
+        else:
+            try:
+                _BUILT_PATTERNS.append((re.compile(alias, re.IGNORECASE), cc, flag))
+            except re.error:
+                pass
 
-CC_RE = re.compile(r'\b([a-zA-Z]{2})\b', re.IGNORECASE)
+RUSSIA_CC = 'RU'
 
-def cc_to_flag(cc: str) -> str:
-    return ''.join(chr(0x1F1E0 + ord(c) - ord('A')) for c in cc.upper())
-
-def parse_country(remark: str):
-    """Возвращает (флаг, is_foreign)"""
-    remark_lower = remark.lower()
-
-    # 1. Ищем флаг-эмодзи
-    flags = FLAG_RE.findall(remark)
+def detect_country(remark: str) -> tuple[str, str] | None:
+    """
+    Возвращает (flag_emoji, country_code) или None если страна не определена.
+    Порядок: флаг-эмодзи в тексте → паттерны по имени → None.
+    """
+    # 1. Прямой поиск флага-эмодзи
+    flags = _FLAG_RE.findall(remark)
     if flags:
         flag = flags[0]
-        return flag, flag != RUSSIAN_FLAG
+        # Определяем код страны по флагу
+        cc_chars = [chr(ord(c) - 0x1F1E6 + ord('A')) for c in flag]
+        cc = ''.join(cc_chars)
+        return flag, cc
 
-    # 2. Текстовые паттерны для России
-    if RUSSIAN_TEXT_RE.search(remark):
-        return RUSSIAN_FLAG, False
+    # 2. Текстовые паттерны
+    for pattern, cc, flag in _BUILT_PATTERNS:
+        if pattern.search(remark):
+            return flag, cc
 
-    # 3. Поиск города в remark
-    for city, cc in CITY_TO_CC.items():
-        pattern = r'(?:^|[._\-\s])' + re.escape(city) + r'(?:$|[._\-\s\d])'
-        if re.search(pattern, remark_lower):
-            return cc_to_flag(cc), cc != 'RU'
-
-    # 4. Двухбуквенный код страны (регистронезависимый)
-    for code in CC_RE.findall(remark):
-        code_upper = code.upper()
-        if code_upper in KNOWN_CC:
-            return cc_to_flag(code_upper), code_upper != 'RU'
-
-    # 5. Проверяем TLD доменов
-    tld_to_cc = {
-        '.ru': 'RU', '.su': 'RU', '.рф': 'RU',
-        '.de': 'DE', '.nl': 'NL', '.fr': 'FR', '.uk': 'GB', '.gb': 'GB',
-        '.fi': 'FI', '.se': 'SE', '.no': 'NO', '.pl': 'PL', '.cz': 'CZ',
-        '.at': 'AT', '.be': 'BE', '.ch': 'CH', '.dk': 'DK', '.es': 'ES',
-        '.it': 'IT', '.pt': 'PT', '.hu': 'HU', '.ro': 'RO', '.bg': 'BG',
-        '.tr': 'TR', '.ua': 'UA', '.by': 'BY', '.kz': 'KZ', '.az': 'AZ',
-        '.ge': 'GE', '.am': 'AM', '.md': 'MD', '.lt': 'LT', '.lv': 'LV',
-        '.ee': 'EE', '.sk': 'SK', '.si': 'SI', '.hr': 'HR', '.rs': 'RS',
-        '.jp': 'JP', '.kr': 'KR', '.cn': 'CN', '.hk': 'HK', '.tw': 'TW',
-        '.sg': 'SG', '.my': 'MY', '.id': 'ID', '.th': 'TH', '.vn': 'VN',
-        '.in': 'IN', '.pk': 'PK', '.bd': 'BD', '.lk': 'LK', '.np': 'NP',
-        '.mn': 'MN', '.kg': 'KG', '.tj': 'TJ', '.tm': 'TM', '.uz': 'UZ',
-        '.il': 'IL', '.ae': 'AE', '.sa': 'SA', '.qa': 'QA', '.kw': 'KW',
-        '.bh': 'BH', '.om': 'OM', '.jo': 'JO', '.lb': 'LB', '.ir': 'IR',
-        '.iq': 'IQ', '.eg': 'EG', '.za': 'ZA', '.ng': 'NG', '.ke': 'KE',
-        '.gh': 'GH', '.et': 'ET', '.tz': 'TZ', '.ma': 'MA', '.dz': 'DZ',
-        '.tn': 'TN', '.ca': 'CA', '.mx': 'MX', '.br': 'BR', '.ar': 'AR',
-        '.cl': 'CL', '.co': 'CO', '.pe': 'PE', '.ve': 'VE', '.au': 'AU',
-        '.nz': 'NZ', '.us': 'US', '.ie': 'IE', '.is': 'IS', '.lu': 'LU',
-        '.mt': 'MT', '.cy': 'CY', '.gr': 'GR', '.ph': 'PH',
-    }
-    for tld, cc in tld_to_cc.items():
-        if tld in remark_lower:
-            return cc_to_flag(cc), cc != 'RU'
-
-    # 6. Неизвестно
-    return None, True
+    return None  # Страна не определена → конфиг пропускаем
 
 # ─── Работа с конфигами ───────────────────────────────────────────────────────
 def get_remark(config: str) -> str:
@@ -292,22 +194,27 @@ def set_remark(config: str, remark: str) -> str:
     base = config.split('#', 1)[0] if '#' in config else config
     return base + '#' + quote(remark, safe='')
 
-def rename_config(config: str, section: str) -> str:
-    """section = 'wifi' или 'обход бс'"""
+def rename_config(config: str, section: str) -> str | None:
+    """
+    Возвращает переименованный конфиг или None если страна не определена.
+    """
     remark = get_remark(config)
-    flag, is_foreign = parse_country(remark)
+    result = detect_country(remark)
+    if result is None:
+        return None  # пропускаем — нет локации
 
-    flag_str = flag if flag else '🏳 unknown'
-    ai_tag   = ' (ai)' if is_foreign else ''
-    new_remark = f"{flag_str}{ai_tag} {section}"
+    flag, cc = result
+    is_foreign = (cc != RUSSIA_CC)
+    ai_tag = ' (ai)' if is_foreign else ''
+    new_remark = f"{flag}{ai_tag} {section}"
     return set_remark(config, new_remark)
 
-def fetch_configs(url: str) -> list:
+# ─── Загрузка конфигов ────────────────────────────────────────────────────────
+def fetch_configs(url: str) -> list[str]:
     try:
         r = requests.get(url, timeout=20, headers={'User-Agent': 'Mozilla/5.0'})
         r.raise_for_status()
         text = r.text.strip()
-
         # Попытка base64-декода
         try:
             decoded = base64.b64decode(text + '==').decode('utf-8', errors='ignore')
@@ -315,54 +222,91 @@ def fetch_configs(url: str) -> list:
                 text = decoded
         except Exception:
             pass
-
         configs = [
             line.strip() for line in text.splitlines()
             if line.strip() and any(line.strip().startswith(p) for p in VALID_PREFIXES)
         ]
-        print(f"  ✓ {url.split('/')[-1][:40]}: {len(configs)} конфигов")
+        print(f"  ✓ ...{url[-45:]}: {len(configs)}")
         return configs
-
     except Exception as e:
         print(f"  ✗ {url}: {e}")
         return []
 
-def fetch_all(sources: list) -> list:
-    result = []
+def random_split(total: int, n: int) -> list[int]:
+    """Разбивает total на n случайных частей (каждая >= 1)"""
+    weights = [random.random() for _ in range(n)]
+    s = sum(weights)
+    counts = [max(1, int(w / s * total)) for w in weights]
+    diff = total - sum(counts)
+    for _ in range(abs(diff)):
+        idx = random.randint(0, n - 1)
+        counts[idx] = max(1, counts[idx] + (1 if diff > 0 else -1))
+    return counts
+
+def sample_from_sources(sources: list[str], total: int, section: str) -> list[str]:
+    """
+    Загружает из каждого источника, берёт случайное кол-во с каждого,
+    переименовывает, пропускает конфиги без локации.
+    Итого: ровно total конфигов (или меньше если пулы маленькие).
+    """
+    pools = []
     for url in sources:
-        result.extend(fetch_configs(url))
-    return result
+        c = fetch_configs(url)
+        if c:
+            pools.append(c)
+
+    if not pools:
+        return []
+
+    counts = random_split(total, len(pools))
+    result = []
+
+    for pool, count in zip(pools, counts):
+        candidates = random.sample(pool, min(count * 3, len(pool)))  # берём с запасом
+        added = 0
+        for cfg in candidates:
+            if added >= count:
+                break
+            renamed = rename_config(cfg, section)
+            if renamed is not None:
+                result.append(renamed)
+                added += 1
+
+    # Если не набрали total — добираем из всех пулов
+    if len(result) < total:
+        all_remaining = []
+        for pool in pools:
+            for cfg in pool:
+                renamed = rename_config(cfg, section)
+                if renamed is not None and renamed not in result:
+                    all_remaining.append(renamed)
+        random.shuffle(all_remaining)
+        need = total - len(result)
+        result.extend(all_remaining[:need])
+
+    random.shuffle(result)
+    return result[:total]
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     print("📡 Загружаю wifi конфиги...")
-    wifi_pool = fetch_all(WIFI_SOURCES)
+    wifi = sample_from_sources(WIFI_SOURCES, 150, 'wifi')
 
     print("\n📡 Загружаю bypass конфиги...")
-    bypass_pool = fetch_all(BYPASS_SOURCES)
+    bypass = sample_from_sources(BYPASS_SOURCES, 150, 'обход бс')
 
-    print(f"\nПул: wifi={len(wifi_pool)}, bypass={len(bypass_pool)}")
-
-    wifi_sample   = random.sample(wifi_pool,   min(150, len(wifi_pool)))
-    bypass_sample = random.sample(bypass_pool, min(150, len(bypass_pool)))
-
-    wifi_renamed   = [rename_config(c, 'wifi')     for c in wifi_sample]
-    bypass_renamed = [rename_config(c, 'обход бс') for c in bypass_sample]
-
-    output_lines = [
-        HEADER,
-        '',
+    output = '\n'.join([
+        HEADER, '',
         SEPARATOR_WIFI,
-        *wifi_renamed,
-        '',
+        *wifi, '',
         SEPARATOR_BYPASS,
-        *bypass_renamed,
-    ]
+        *bypass,
+    ])
 
     with open('tri_228.txt', 'w', encoding='utf-8') as f:
-        f.write('\n'.join(output_lines))
+        f.write(output)
 
-    print(f"\n✅ Готово! wifi: {len(wifi_renamed)}, bypass: {len(bypass_renamed)}")
+    print(f"\n✅ Готово! wifi: {len(wifi)}, bypass: {len(bypass)}")
 
 if __name__ == '__main__':
     main()
