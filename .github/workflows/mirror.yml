@@ -45,7 +45,6 @@ jobs:
 
   mirror:
     runs-on: ubuntu-latest
-    # Запускается всегда — даже если update упал
     needs: update
     if: always()
     permissions:
@@ -59,8 +58,11 @@ jobs:
 
       - name: Mirror to GitVerse
         run: |
+          # Подтягиваем СВЕЖИЙ origin — включая коммит от update джоба
+          git fetch origin
+          git reset --hard origin/main
+
           git remote add gitverse https://gitverse.ru/nzea234/nzea234-kvn.git
           git config --global credential.helper store
           echo "https://nzea234:${{ secrets.MIRROR_OKAK_67_KVN_BS }}@gitverse.ru" > ~/.git-credentials
-          git fetch --all
           git push --mirror gitverse
