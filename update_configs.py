@@ -3,7 +3,15 @@ import requests
 import random
 import base64
 import re
+import socket
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from urllib.parse import unquote, quote, urlparse
+
+# ─── Настройки пинга ─────────────────────────────────────────────────────────
+PING_MAX_MS   = 500   # конфиг пропускается если пинг > этого (мс)
+PING_WORKERS  = 100   # сколько потоков пингуют одновременно
+PING_TIMEOUT  = 2.0   # таймаут TCP-коннекта (сек)
 
 # ─── Заголовок файла (не трогать) ────────────────────────────────────────────
 HEADER = """\
@@ -45,18 +53,14 @@ BYPASS_SOURCES = [
 VALID_PREFIXES = ('vless://', 'vmess://', 'trojan://', 'ss://', 'ssr://', 'hysteria2://', 'hy2://', 'tuic://')
 
 # ─── База стран ───────────────────────────────────────────────────────────────
-# Маппинг: всё что распознаём → (код ISO, флаг)
 def _flag(cc):
     return ''.join(chr(0x1F1E6 + ord(c) - ord('A')) for c in cc.upper())
 
-# Список: (паттерн для поиска, код страны)
-# Порядок важен — более специфичные паттерны раньше
-COUNTRY_PATTERNS: list[tuple[re.Pattern, str]] = []
+_FLAG_RE = re.compile(r'[\U0001F1E6-\U0001F1FF]{2}')
+_BUILT_PATTERNS: list[tuple[re.Pattern, str, str]] = []
 
 _NAMES = [
-    # Россия
     ('RU', ['🇷🇺', 'Russia', 'Россия', 'RUS', r'\bRU\b']),
-    # СНГ и ближнее зарубежье
     ('UA', ['🇺🇦', 'Ukraine', 'Украина', r'\bUA\b']),
     ('BY', ['🇧🇾', 'Belarus', 'Беларусь', r'\bBY\b']),
     ('KZ', ['🇰🇿', 'Kazakhstan', 'Казахстан', r'\bKZ\b']),
@@ -68,7 +72,6 @@ _NAMES = [
     ('KG', ['🇰🇬', 'Kyrgyzstan', r'\bKG\b']),
     ('TJ', ['🇹🇯', 'Tajikistan', r'\bTJ\b']),
     ('TM', ['🇹🇲', 'Turkmenistan', r'\bTM\b']),
-    # Европа
     ('DE', ['🇩🇪', 'Germany', 'Deutschland', 'Германия', r'\bDE\b']),
     ('FR', ['🇫🇷', 'France', 'Франция', r'\bFR\b']),
     ('GB', ['🇬🇧', 'United Kingdom', 'UK', 'Britain', r'\bGB\b']),
@@ -103,7 +106,6 @@ _NAMES = [
     ('LU', ['🇱🇺', 'Luxembourg', r'\bLU\b']),
     ('MT', ['🇲🇹', 'Malta', r'\bMT\b']),
     ('CY', ['🇨🇾', 'Cyprus', r'\bCY\b']),
-    # Азия
     ('JP', ['🇯🇵', 'Japan', 'Япония', r'\bJP\b']),
     ('KR', ['🇰🇷', 'Korea', r'\bKR\b']),
     ('CN', ['🇨🇳', 'China', 'Китай', r'\bCN\b']),
@@ -118,18 +120,14 @@ _NAMES = [
     ('PK', ['🇵🇰', 'Pakistan', r'\bPK\b']),
     ('BD', ['🇧🇩', 'Bangladesh', r'\bBD\b']),
     ('MN', ['🇲🇳', 'Mongolia', r'\bMN\b']),
-    # Ближний Восток
     ('AE', ['🇦🇪', 'Emirates', 'UAE', r'\bAE\b']),
     ('SA', ['🇸🇦', 'Saudi', r'\bSA\b']),
-    ('TR', ['🇹🇷', 'Turkey', r'\bTR\b']),
     ('IL', ['🇮🇱', 'Israel', r'\bIL\b']),
     ('IR', ['🇮🇷', 'Iran', r'\bIR\b']),
     ('IQ', ['🇮🇶', 'Iraq', r'\bIQ\b']),
-    # Африка
     ('ZA', ['🇿🇦', 'South Africa', r'\bZA\b']),
     ('NG', ['🇳🇬', 'Nigeria', r'\bNG\b']),
     ('EG', ['🇪🇬', 'Egypt', r'\bEG\b']),
-    # Америка
     ('US', ['🇺🇸', 'United States', 'USA', r'\bUS\b']),
     ('CA', ['🇨🇦', 'Canada', r'\bCA\b']),
     ('MX', ['🇲🇽', 'Mexico', r'\bMX\b']),
@@ -137,27 +135,20 @@ _NAMES = [
     ('AR', ['🇦🇷', 'Argentina', r'\bAR\b']),
     ('CL', ['🇨🇱', 'Chile', r'\bCL\b']),
     ('CO', ['🇨🇴', 'Colombia', r'\bCO\b']),
-    # Океания
     ('AU', ['🇦🇺', 'Australia', r'\bAU\b']),
     ('NZ', ['🇳🇿', 'New Zealand', r'\bNZ\b']),
 ]
 
-# Строим скомпилированный список паттернов
-_FLAG_RE = re.compile(r'[\U0001F1E6-\U0001F1FF]{2}')
-_BUILT_PATTERNS: list[tuple[re.Pattern, str, str]] = []  # (pattern, cc, flag)
 for cc, aliases in _NAMES:
     flag = _flag(cc)
     for alias in aliases:
-        # Флаг-эмодзи — ищем напрямую
         if any(ord(c) > 127 for c in alias):
             try:
                 _BUILT_PATTERNS.append((re.compile(re.escape(alias)), cc, flag))
             except re.error:
                 pass
-        # Двухбуквенный код вида \bXX\b — только UPPERCASE, без IGNORECASE
         elif re.fullmatch(r'\\b[A-Z]{2}\\b', alias):
             _BUILT_PATTERNS.append((re.compile(alias), cc, flag))
-        # Полное название страны — case-insensitive
         else:
             try:
                 _BUILT_PATTERNS.append((re.compile(alias, re.IGNORECASE), cc, flag))
@@ -167,25 +158,85 @@ for cc, aliases in _NAMES:
 RUSSIA_CC = 'RU'
 
 def detect_country(remark: str) -> tuple[str, str] | None:
-    """
-    Возвращает (flag_emoji, country_code) или None если страна не определена.
-    Порядок: флаг-эмодзи в тексте → паттерны по имени → None.
-    """
-    # 1. Прямой поиск флага-эмодзи
     flags = _FLAG_RE.findall(remark)
     if flags:
         flag = flags[0]
-        # Определяем код страны по флагу
         cc_chars = [chr(ord(c) - 0x1F1E6 + ord('A')) for c in flag]
         cc = ''.join(cc_chars)
         return flag, cc
-
-    # 2. Текстовые паттерны
     for pattern, cc, flag in _BUILT_PATTERNS:
         if pattern.search(remark):
             return flag, cc
+    return None
 
-    return None  # Страна не определена → конфиг пропускаем
+# ─── TCP пинг ─────────────────────────────────────────────────────────────────
+def extract_host_port(config: str) -> tuple[str, int] | None:
+    """Вытаскивает (host, port) из конфига любого типа."""
+    try:
+        # vmess:// — base64 JSON
+        if config.startswith('vmess://'):
+            raw = config[8:].split('#')[0]
+            data = base64.b64decode(raw + '==').decode('utf-8', errors='ignore')
+            import json
+            j = json.loads(data)
+            return j.get('add', ''), int(j.get('port', 443))
+
+        # Все остальные — стандартный URL
+        parsed = urlparse(config)
+        host = parsed.hostname
+        port = parsed.port
+        if host and port:
+            return host, port
+    except Exception:
+        pass
+    return None
+
+def tcp_ping_ms(host: str, port: int, timeout: float = PING_TIMEOUT) -> float | None:
+    """Возвращает задержку в мс или None если недоступен."""
+    try:
+        start = time.perf_counter()
+        with socket.create_connection((host, port), timeout=timeout):
+            pass
+        return (time.perf_counter() - start) * 1000
+    except Exception:
+        return None
+
+def ping_config(config: str) -> tuple[str, float | None]:
+    """Пингует конфиг и возвращает (config, ping_ms или None)."""
+    hp = extract_host_port(config)
+    if hp is None:
+        return config, None
+    host, port = hp
+    ms = tcp_ping_ms(host, port)
+    return config, ms
+
+def filter_by_ping(configs: list[str], max_ms: int = PING_MAX_MS) -> list[str]:
+    """
+    Пингует все конфиги параллельно, возвращает только те у которых пинг <= max_ms,
+    отсортированные по пингу (лучшие первые).
+    """
+    if not configs:
+        return []
+
+    print(f"  🏓 Пингую {len(configs)} конфигов ({PING_WORKERS} потоков, макс {max_ms}мс)...")
+    results: list[tuple[str, float]] = []
+    no_host = 0
+
+    with ThreadPoolExecutor(max_workers=PING_WORKERS) as ex:
+        futures = {ex.submit(ping_config, cfg): cfg for cfg in configs}
+        for future in as_completed(futures):
+            cfg, ms = future.result()
+            if ms is None:
+                no_host += 1
+            elif ms <= max_ms:
+                results.append((cfg, ms))
+
+    results.sort(key=lambda x: x[1])
+    good = [cfg for cfg, _ in results]
+    print(f"  ✅ Прошли пинг: {len(good)}/{len(configs)} "
+          f"(отброшено недоступных: {len(configs) - len(good) - no_host}, "
+          f"без хоста: {no_host})")
+    return good
 
 # ─── Работа с конфигами ───────────────────────────────────────────────────────
 def get_remark(config: str) -> str:
@@ -198,14 +249,10 @@ def set_remark(config: str, remark: str) -> str:
     return base + '#' + quote(remark, safe='')
 
 def rename_config(config: str, section: str) -> str | None:
-    """
-    Возвращает переименованный конфиг или None если страна не определена.
-    """
     remark = get_remark(config)
     result = detect_country(remark)
     if result is None:
-        return None  # пропускаем — нет локации
-
+        return None
     flag, cc = result
     is_foreign = (cc != RUSSIA_CC)
     ai_tag = ' (ai)' if is_foreign else ''
@@ -218,7 +265,6 @@ def fetch_configs(url: str) -> list[str]:
         r = requests.get(url, timeout=20, headers={'User-Agent': 'Mozilla/5.0'})
         r.raise_for_status()
         text = r.text.strip()
-        # Попытка base64-декода
         try:
             decoded = base64.b64decode(text + '==').decode('utf-8', errors='ignore')
             if any(decoded.startswith(p) for p in VALID_PREFIXES):
@@ -236,7 +282,6 @@ def fetch_configs(url: str) -> list[str]:
         return []
 
 def random_split(total: int, n: int) -> list[int]:
-    """Разбивает total на n случайных частей (каждая >= 1)"""
     weights = [random.random() for _ in range(n)]
     s = sum(weights)
     counts = [max(1, int(w / s * total)) for w in weights]
@@ -246,11 +291,11 @@ def random_split(total: int, n: int) -> list[int]:
         counts[idx] = max(1, counts[idx] + (1 if diff > 0 else -1))
     return counts
 
-def sample_from_sources(sources: list[str], total: int, section: str) -> list[str]:
+def sample_from_sources(sources: list[str], total: int, section: str,
+                        ping_filter: bool = False) -> list[str]:
     """
-    Загружает из каждого источника, берёт случайное кол-во с каждого,
-    переименовывает, пропускает конфиги без локации.
-    Итого: ровно total конфигов (или меньше если пулы маленькие).
+    ping_filter=True — пингует ВСЕ загруженные конфиги и оставляет только хорошие,
+    потом берёт total штук. Используется только для wifi-секции.
     """
     pools = []
     for url in sources:
@@ -261,42 +306,31 @@ def sample_from_sources(sources: list[str], total: int, section: str) -> list[st
     if not pools:
         return []
 
-    counts = random_split(total, len(pools))
-    result = []
-
-    for pool, count in zip(pools, counts):
-        candidates = random.sample(pool, min(count * 3, len(pool)))  # берём с запасом
-        added = 0
-        for cfg in candidates:
-            if added >= count:
-                break
+    # Собираем все кандидаты для переименования
+    all_candidates = []
+    for pool in pools:
+        for cfg in pool:
             renamed = rename_config(cfg, section)
             if renamed is not None:
-                result.append(renamed)
-                added += 1
+                all_candidates.append(renamed)
 
-    # Если не набрали total — добираем из всех пулов
-    if len(result) < total:
-        all_remaining = []
-        for pool in pools:
-            for cfg in pool:
-                renamed = rename_config(cfg, section)
-                if renamed is not None and renamed not in result:
-                    all_remaining.append(renamed)
-        random.shuffle(all_remaining)
-        need = total - len(result)
-        result.extend(all_remaining[:need])
+    # ── Пинг-фильтр (только для wifi) ────────────────────────────────────────
+    if ping_filter:
+        all_candidates = filter_by_ping(all_candidates, PING_MAX_MS)
+        if not all_candidates:
+            print("  ⚠️  После пинг-фильтра не осталось конфигов!")
+            return []
 
-    random.shuffle(result)
-    return result[:total]
+    random.shuffle(all_candidates)
+    return all_candidates[:total]
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     print("📡 Загружаю wifi конфиги...")
-    wifi = sample_from_sources(WIFI_SOURCES, 150, 'wifi')
+    wifi = sample_from_sources(WIFI_SOURCES, 150, 'wifi', ping_filter=True)
 
     print("\n📡 Загружаю bypass конфиги...")
-    bypass = sample_from_sources(BYPASS_SOURCES, 150, 'обход бс')
+    bypass = sample_from_sources(BYPASS_SOURCES, 150, 'обход бс', ping_filter=False)
 
     output = '\n'.join([
         HEADER, '',
