@@ -1,3 +1,3 @@
 <div align="center">
-  <img src="./assets/banner.jpg" alt="Роскомнадзор-тян" />
+  <img src="./assets/banner.jpg" />
 </div>
