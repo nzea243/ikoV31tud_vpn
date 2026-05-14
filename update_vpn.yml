@@ -1,0 +1,34 @@
+name: Update VPN Configs
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # каждые 30 минут
+  workflow_dispatch:          # ручной запуск
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run updater
+        run: python update_configs.py
+
+      - name: Commit & push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tri_228.txt
+          git diff --staged --quiet || git commit -m "⚡ update configs $(date -u '+%H:%M %d.%m.%Y UTC')"
+          git push
