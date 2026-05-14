@@ -5,28 +5,27 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 */6 * * *' # Обновление каждые 6 часов
-  workflow_dispatch: # Кнопка для ручного запуска
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
-  sync:
+  update:
     runs-on: ubuntu-latest
-    # Даем права на запись, чтобы экшн мог пушить изменения
     permissions:
       contents: write
 
     steps:
-      - name: Checkout Code
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
-      - name: Install Requests
+      - name: Install deps
         run: pip install requests
 
       - name: Update Configs
@@ -37,18 +36,31 @@ jobs:
           git config --global user.name "nzea-bot"
           git config --global user.email "nzea-bot@users.noreply.github.com"
           git add tri_228.txt
-          # Проверяем, есть ли изменения, чтобы не плодить пустые коммиты
           if git diff --staged --quiet; then
-            echo "Изменений нет, скипаем коммит."
+            echo "Нет изменений, коммит не нужен."
           else
-            git commit -m "Update configs: $(date +'%d.%m.%Y %H:%M')"
+            git commit -m "⚡ update configs $(date +'%d.%m.%Y %H:%M')"
             git push origin main
           fi
+
+  mirror:
+    runs-on: ubuntu-latest
+    # Запускается всегда — даже если update упал
+    needs: update
+    if: always()
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Mirror to GitVerse
         run: |
           git remote add gitverse https://gitverse.ru/nzea234/nzea234-kvn.git
           git config --global credential.helper store
           echo "https://nzea234:${{ secrets.MIRROR_OKAK_67_KVN_BS }}@gitverse.ru" > ~/.git-credentials
-          # Пушим актуальную ветку main
-          git push gitverse main --force
+          git fetch --all
+          git push --mirror gitverse
