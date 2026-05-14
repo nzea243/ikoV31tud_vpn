@@ -1,21 +1,54 @@
-name: Mirror to GitVerse
+name: Auto-Update and Sync to GitVerse
 
 on:
   push:
     branches:
-      - '**'  # все ветки
+      - main
+  schedule:
+    - cron: '0 */6 * * *' # Обновление каждые 6 часов
+  workflow_dispatch: # Кнопка для ручного запуска
 
 jobs:
-  mirror:
+  sync:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # обязательно, иначе история обрежется
+    # Даем права на запись, чтобы экшн мог пушить изменения
+    permissions:
+      contents: write
 
-      - name: Push mirror to GitVerse
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Requests
+        run: pip install requests
+
+      - name: Update Configs
+        run: python update_configs.py
+
+      - name: Commit and Push to GitHub
+        run: |
+          git config --global user.name "nzea-bot"
+          git config --global user.email "nzea-bot@users.noreply.github.com"
+          git add tri_228.txt
+          # Проверяем, есть ли изменения, чтобы не плодить пустые коммиты
+          if git diff --staged --quiet; then
+            echo "Изменений нет, скипаем коммит."
+          else
+            git commit -m "Update configs: $(date +'%d.%m.%Y %H:%M')"
+            git push origin main
+          fi
+
+      - name: Mirror to GitVerse
         run: |
           git remote add gitverse https://gitverse.ru/nzea234/nzea234-kvn.git
           git config --global credential.helper store
           echo "https://nzea234:${{ secrets.MIRROR_OKAK_67_KVN_BS }}@gitverse.ru" > ~/.git-credentials
-          git push --mirror gitverse
+          # Пушим актуальную ветку main
+          git push gitverse main --force
