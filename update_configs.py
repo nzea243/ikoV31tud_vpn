@@ -25,6 +25,9 @@ WIFI_SOURCES = [
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_VLESS_RUS.txt",
     "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/BLACK_SS+All_RUS.txt",
     "https://raw.githubusercontent.com/nzea243/okak/refs/heads/main/sub.txt",
+    "https://mifa.world/hysteria",
+    "https://mifa.world/vless",
+    "https://mifa.world/other",
 ]
 
 BYPASS_SOURCES = [
