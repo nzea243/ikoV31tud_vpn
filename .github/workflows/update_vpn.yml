@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  update-and-mirror:
+  update:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -27,7 +27,7 @@ jobs:
       - name: Run updater
         run: python update_configs.py
 
-      - name: Commit & push to GitHub
+      - name: Commit & push
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -39,10 +39,3 @@ jobs:
             git pull --rebase origin main
             git push origin main
           fi
-
-      - name: Mirror to GitVerse
-        run: |
-          git remote add gitverse https://gitverse.ru/nzea234/nzea234-kvn.git
-          git config --global credential.helper store
-          echo "https://nzea234:${{ secrets.MIRROR_OKAK_67_KVN_BS }}@gitverse.ru" > ~/.git-credentials
-          git push --mirror gitverse
