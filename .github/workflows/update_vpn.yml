@@ -42,7 +42,7 @@ jobs:
 
       - name: Push tri_228.txt to GitVerse
         run: |
-          git clone https://nzea234:${{ secrets.MIRROR_OKAK_67_KVN_BS }}@gitverse.ru/nzea234/nzea234-kvn.git gitverse_repo
+          git clone https://nzea234:${{ secrets.MIRROR_OKAK_67_KVN_BS }}@gitverse.ru/nzea234/ekaterina_nevilikaya228.git gitverse_repo
           cp tri_228.txt gitverse_repo/tri_228.txt
           cd gitverse_repo
           git config user.name "github-actions[bot]"
