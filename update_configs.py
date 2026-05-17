@@ -30,6 +30,18 @@ WIFI_SOURCES = [
     "https://mifa.world/hysteria",
     "https://mifa.world/vless",
     "https://mifa.world/other",
+    "https://etoneya.best/1",
+    "https://gist.github.com/DestroyST6767/f00837ad379aa3272183fdaabcfd50da.txt",
+    "https://raw.githubusercontent.com/Temnuk/naabuzil/refs/heads/main/wifi",
+    "https://raw.githubusercontent.com/ShatakVPN/ConfigForge-V2Ray/main/configs/ru/vless.txt",
+    "https://subrostunnel.vercel.app/gen.txt",
+    "https://rostunnel.vercel.app/mega.txt",
+    "https://raw.githubusercontent.com/modrinthmodification-create/ownedvpn/main/subscription.txt",
+    "https://alley.serv00.net/youtube",
+    "https://alley.serv00.net/other",
+    "https://raw.githubusercontent.com/Maskkost93/kizyak-vpn-4.0/refs/heads/main/kizyakbeta6BL.txt",
+    "https://raw.githubusercontent.com/Ilyacom4ik/free-v2ray-2026/main/subscriptions/FreeCFGHub1.txt",
+    "https://raw.githubusercontent.com/Kirill39127/-my-sub/refs/heads/main/sub.txt",
 ]
 
 BYPASS_SOURCES = [
@@ -43,6 +55,18 @@ BYPASS_SOURCES = [
     "https://raw.githubusercontent.com/kort0881/vpn-checker-backend/refs/heads/main/checked/RU_Best/ru_white_all_WHITE.txt",
     "https://gitverse.ru/api/repos/kfwlru/sub/raw/branch/main/212.txt",
     "https://raw.githubusercontent.com/AvenCores/goida-vpn-configs/refs/heads/main/githubmirror/26.txt",
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/selected.txt",
+    "https://gitverse.ru/api/repos/bywarm/rser/raw/branch/master/merged.txt",
+    "https://gist.github.com/DestroyST6767/50af50221ca1858ba2084efc0f524fbc.txt",
+    "https://drive.usercontent.google.com/download?id=1Rl6jIlf2Ula__J9F9nRmCuE6RFdqMTgk&export=download&confirm=t",
+    "https://raw.githubusercontent.com/AirLinkVPN1/AirLinkVPN/refs/heads/main/rkn_white_list",
+    "https://raw.githubusercontent.com/dequar/deqwl/refs/heads/main/deray.txt",
+    "https://gitflic.ru/project/sigil/my-new-cool-project/blob/raw?file=whitelist",
+    "https://raw.githubusercontent.com/Sanuyyq/sub-storage1/refs/heads/main/bs.txt",
+    "https://raw.githubusercontent.com/ewecrow78-gif/whitelist1/main/list.txt",
+    "https://ety.twinkvibe.gay/whitelist",
+    "https://raw.githubusercontent.com/ByeWhiteLists/ByeWhiteLists2/refs/heads/main/ByeWhiteLists2.txt",
+    "https://raw.githubusercontent.com/Maskkost93/kizyak-vpn-4.0/refs/heads/main/kizyakbeta6.txt",
 ]
 
 VALID_PREFIXES = ('vless://', 'vmess://', 'trojan://', 'ss://', 'ssr://', 'hysteria2://', 'hy2://', 'tuic://')
