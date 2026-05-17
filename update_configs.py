@@ -3,14 +3,17 @@ import requests
 import random
 import base64
 import re
+from datetime import datetime, timezone
 from urllib.parse import unquote, quote, urlparse
 
-# ─── Заголовок файла (не трогать) ────────────────────────────────────────────
-HEADER = """\
+# ─── Заголовок файла ──────────────────────────────────────────────────────────
+def build_header():
+    now = datetime.now(timezone.utc).strftime('%H:%M %d.%m.%Y UTC')
+    return f"""\
 #profile-title: nzea234vpnツ
-#announce: Не работает подписка, обнови ее на две стрелочки
+#announce: Последний апдейт на GitHub: {now} | Не работает — обнови подписку на две стрелочки
 #support-url: https://t.me/nzea_tri_bykvi
-#profile-update-interval: 1
+#profile-update-interval: 3
 #profile-locked: true
 #profile-type: encrypted
 #profile-locked: true
@@ -45,18 +48,13 @@ BYPASS_SOURCES = [
 VALID_PREFIXES = ('vless://', 'vmess://', 'trojan://', 'ss://', 'ssr://', 'hysteria2://', 'hy2://', 'tuic://')
 
 # ─── База стран ───────────────────────────────────────────────────────────────
-# Маппинг: всё что распознаём → (код ISO, флаг)
 def _flag(cc):
     return ''.join(chr(0x1F1E6 + ord(c) - ord('A')) for c in cc.upper())
 
-# Список: (паттерн для поиска, код страны)
-# Порядок важен — более специфичные паттерны раньше
 COUNTRY_PATTERNS: list[tuple[re.Pattern, str]] = []
 
 _NAMES = [
-    # Россия
     ('RU', ['🇷🇺', 'Russia', 'Россия', 'RUS', r'\bRU\b']),
-    # СНГ и ближнее зарубежье
     ('UA', ['🇺🇦', 'Ukraine', 'Украина', r'\bUA\b']),
     ('BY', ['🇧🇾', 'Belarus', 'Беларусь', r'\bBY\b']),
     ('KZ', ['🇰🇿', 'Kazakhstan', 'Казахстан', r'\bKZ\b']),
@@ -68,7 +66,6 @@ _NAMES = [
     ('KG', ['🇰🇬', 'Kyrgyzstan', r'\bKG\b']),
     ('TJ', ['🇹🇯', 'Tajikistan', r'\bTJ\b']),
     ('TM', ['🇹🇲', 'Turkmenistan', r'\bTM\b']),
-    # Европа
     ('DE', ['🇩🇪', 'Germany', 'Deutschland', 'Германия', r'\bDE\b']),
     ('FR', ['🇫🇷', 'France', 'Франция', r'\bFR\b']),
     ('GB', ['🇬🇧', 'United Kingdom', 'UK', 'Britain', r'\bGB\b']),
@@ -103,7 +100,6 @@ _NAMES = [
     ('LU', ['🇱🇺', 'Luxembourg', r'\bLU\b']),
     ('MT', ['🇲🇹', 'Malta', r'\bMT\b']),
     ('CY', ['🇨🇾', 'Cyprus', r'\bCY\b']),
-    # Азия
     ('JP', ['🇯🇵', 'Japan', 'Япония', r'\bJP\b']),
     ('KR', ['🇰🇷', 'Korea', r'\bKR\b']),
     ('CN', ['🇨🇳', 'China', 'Китай', r'\bCN\b']),
@@ -118,18 +114,14 @@ _NAMES = [
     ('PK', ['🇵🇰', 'Pakistan', r'\bPK\b']),
     ('BD', ['🇧🇩', 'Bangladesh', r'\bBD\b']),
     ('MN', ['🇲🇳', 'Mongolia', r'\bMN\b']),
-    # Ближний Восток
     ('AE', ['🇦🇪', 'Emirates', 'UAE', r'\bAE\b']),
     ('SA', ['🇸🇦', 'Saudi', r'\bSA\b']),
-    ('TR', ['🇹🇷', 'Turkey', r'\bTR\b']),
     ('IL', ['🇮🇱', 'Israel', r'\bIL\b']),
     ('IR', ['🇮🇷', 'Iran', r'\bIR\b']),
     ('IQ', ['🇮🇶', 'Iraq', r'\bIQ\b']),
-    # Африка
     ('ZA', ['🇿🇦', 'South Africa', r'\bZA\b']),
     ('NG', ['🇳🇬', 'Nigeria', r'\bNG\b']),
     ('EG', ['🇪🇬', 'Egypt', r'\bEG\b']),
-    # Америка
     ('US', ['🇺🇸', 'United States', 'USA', r'\bUS\b']),
     ('CA', ['🇨🇦', 'Canada', r'\bCA\b']),
     ('MX', ['🇲🇽', 'Mexico', r'\bMX\b']),
@@ -137,27 +129,22 @@ _NAMES = [
     ('AR', ['🇦🇷', 'Argentina', r'\bAR\b']),
     ('CL', ['🇨🇱', 'Chile', r'\bCL\b']),
     ('CO', ['🇨🇴', 'Colombia', r'\bCO\b']),
-    # Океания
     ('AU', ['🇦🇺', 'Australia', r'\bAU\b']),
     ('NZ', ['🇳🇿', 'New Zealand', r'\bNZ\b']),
 ]
 
-# Строим скомпилированный список паттернов
 _FLAG_RE = re.compile(r'[\U0001F1E6-\U0001F1FF]{2}')
-_BUILT_PATTERNS: list[tuple[re.Pattern, str, str]] = []  # (pattern, cc, flag)
+_BUILT_PATTERNS: list[tuple[re.Pattern, str, str]] = []
 for cc, aliases in _NAMES:
     flag = _flag(cc)
     for alias in aliases:
-        # Флаг-эмодзи — ищем напрямую
         if any(ord(c) > 127 for c in alias):
             try:
                 _BUILT_PATTERNS.append((re.compile(re.escape(alias)), cc, flag))
             except re.error:
                 pass
-        # Двухбуквенный код вида \bXX\b — только UPPERCASE, без IGNORECASE
         elif re.fullmatch(r'\\b[A-Z]{2}\\b', alias):
             _BUILT_PATTERNS.append((re.compile(alias), cc, flag))
-        # Полное название страны — case-insensitive
         else:
             try:
                 _BUILT_PATTERNS.append((re.compile(alias, re.IGNORECASE), cc, flag))
@@ -167,25 +154,16 @@ for cc, aliases in _NAMES:
 RUSSIA_CC = 'RU'
 
 def detect_country(remark: str) -> tuple[str, str] | None:
-    """
-    Возвращает (flag_emoji, country_code) или None если страна не определена.
-    Порядок: флаг-эмодзи в тексте → паттерны по имени → None.
-    """
-    # 1. Прямой поиск флага-эмодзи
     flags = _FLAG_RE.findall(remark)
     if flags:
         flag = flags[0]
-        # Определяем код страны по флагу
         cc_chars = [chr(ord(c) - 0x1F1E6 + ord('A')) for c in flag]
         cc = ''.join(cc_chars)
         return flag, cc
-
-    # 2. Текстовые паттерны
     for pattern, cc, flag in _BUILT_PATTERNS:
         if pattern.search(remark):
             return flag, cc
-
-    return None  # Страна не определена → конфиг пропускаем
+    return None
 
 # ─── Работа с конфигами ───────────────────────────────────────────────────────
 def get_remark(config: str) -> str:
@@ -198,14 +176,10 @@ def set_remark(config: str, remark: str) -> str:
     return base + '#' + quote(remark, safe='')
 
 def rename_config(config: str, section: str) -> str | None:
-    """
-    Возвращает переименованный конфиг или None если страна не определена.
-    """
     remark = get_remark(config)
     result = detect_country(remark)
     if result is None:
-        return None  # пропускаем — нет локации
-
+        return None
     flag, cc = result
     is_foreign = (cc != RUSSIA_CC)
     ai_tag = ' (ai)' if is_foreign else ''
@@ -218,7 +192,6 @@ def fetch_configs(url: str) -> list[str]:
         r = requests.get(url, timeout=20, headers={'User-Agent': 'Mozilla/5.0'})
         r.raise_for_status()
         text = r.text.strip()
-        # Попытка base64-декода
         try:
             decoded = base64.b64decode(text + '==').decode('utf-8', errors='ignore')
             if any(decoded.startswith(p) for p in VALID_PREFIXES):
@@ -236,7 +209,6 @@ def fetch_configs(url: str) -> list[str]:
         return []
 
 def random_split(total: int, n: int) -> list[int]:
-    """Разбивает total на n случайных частей (каждая >= 1)"""
     weights = [random.random() for _ in range(n)]
     s = sum(weights)
     counts = [max(1, int(w / s * total)) for w in weights]
@@ -247,11 +219,6 @@ def random_split(total: int, n: int) -> list[int]:
     return counts
 
 def sample_from_sources(sources: list[str], total: int, section: str) -> list[str]:
-    """
-    Загружает из каждого источника, берёт случайное кол-во с каждого,
-    переименовывает, пропускает конфиги без локации.
-    Итого: ровно total конфигов (или меньше если пулы маленькие).
-    """
     pools = []
     for url in sources:
         c = fetch_configs(url)
@@ -265,7 +232,7 @@ def sample_from_sources(sources: list[str], total: int, section: str) -> list[st
     result = []
 
     for pool, count in zip(pools, counts):
-        candidates = random.sample(pool, min(count * 3, len(pool)))  # берём с запасом
+        candidates = random.sample(pool, min(count * 3, len(pool)))
         added = 0
         for cfg in candidates:
             if added >= count:
@@ -275,7 +242,6 @@ def sample_from_sources(sources: list[str], total: int, section: str) -> list[st
                 result.append(renamed)
                 added += 1
 
-    # Если не набрали total — добираем из всех пулов
     if len(result) < total:
         all_remaining = []
         for pool in pools:
@@ -299,7 +265,7 @@ def main():
     bypass = sample_from_sources(BYPASS_SOURCES, 150, 'обход бс')
 
     output = '\n'.join([
-        HEADER, '',
+        build_header(), '',
         SEPARATOR_WIFI,
         *wifi, '',
         SEPARATOR_BYPASS,
