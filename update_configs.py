@@ -13,7 +13,7 @@ def build_header():
 #profile-title: nzea234vpnツ
 #announce: Последний апдейт на GitHub: {now} | Не работает — обнови подписку на две стрелочки
 #support-url: https://t.me/nzea_tri_bykvi
-#profile-update-interval: 3
+#profile-update-interval: 1
 #profile-locked: true
 #profile-type: encrypted
 #profile-locked: true
