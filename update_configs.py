@@ -259,10 +259,10 @@ def sample_from_sources(sources: list[str], total: int, section: str) -> list[st
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     print("📡 Загружаю wifi конфиги...")
-    wifi = sample_from_sources(WIFI_SOURCES, 100, 'wifi')
+    wifi = sample_from_sources(WIFI_SOURCES, 100, 'wifi @nzea_tri_bykvi')
 
     print("\n📡 Загружаю bypass конфиги...")
-    bypass = sample_from_sources(BYPASS_SOURCES, 100, 'обход бс')
+    bypass = sample_from_sources(BYPASS_SOURCES, 100, 'обход бс @nzea_tri_bykvi')
 
     output = '\n'.join([
         build_header(), '',
