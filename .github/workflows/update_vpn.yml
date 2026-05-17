@@ -52,5 +52,5 @@ jobs:
             echo "Нет изменений на GitVerse."
           else
             git commit -m "⚡ update configs $(date -u '+%H:%M %d.%m.%Y UTC')"
-            git push origin main
+            git push origin HEAD
           fi
