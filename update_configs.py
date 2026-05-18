@@ -21,6 +21,7 @@ def build_header():
 
 SEPARATOR_WIFI   = "vless://info@0.0.0.0:443?type=tcp&security=none#для wifi и моб инет без бс👇"
 SEPARATOR_BYPASS = "vless://info@0.0.0.0:443?type=tcp&security=none#для обхода бс👇"
+SEPARATOR_PC     = "vless://info@0.0.0.0:443?type=tcp&security=none#для пк без бс👇"
 
 WIFI_SOURCES = [
     "https://raw.githubusercontent.com/kort0881/vpn-vless-configs-russia/refs/heads/main/githubmirror/new/all_new.txt",
@@ -189,7 +190,6 @@ def detect_country(remark: str) -> tuple[str, str] | None:
             return flag, cc
     return None
 
-# ─── Работа с конфигами ───────────────────────────────────────────────────────
 def get_remark(config: str) -> str:
     if '#' in config:
         return unquote(config.split('#', 1)[1])
@@ -210,7 +210,6 @@ def rename_config(config: str, section: str) -> str | None:
     new_remark = f"{flag}{ai_tag} {section}"
     return set_remark(config, new_remark)
 
-# ─── Загрузка конфигов ────────────────────────────────────────────────────────
 def fetch_configs(url: str) -> list[str]:
     try:
         r = requests.get(url, timeout=20, headers={'User-Agent': 'Mozilla/5.0'})
@@ -242,10 +241,14 @@ def random_split(total: int, n: int) -> list[int]:
         counts[idx] = max(1, counts[idx] + (1 if diff > 0 else -1))
     return counts
 
-def sample_from_sources(sources: list[str], total: int, section: str) -> list[str]:
+def sample_from_sources(sources: list[str], total: int, section: str,
+                        preloaded: dict[str, list[str]] | None = None) -> list[str]:
     pools = []
     for url in sources:
-        c = fetch_configs(url)
+        if preloaded and url in preloaded:
+            c = preloaded[url]
+        else:
+            c = fetch_configs(url)
         if c:
             pools.append(c)
 
@@ -274,20 +277,29 @@ def sample_from_sources(sources: list[str], total: int, section: str) -> list[st
                 if renamed is not None and renamed not in result:
                     all_remaining.append(renamed)
         random.shuffle(all_remaining)
-        need = total - len(result)
-        result.extend(all_remaining[:need])
+        result.extend(all_remaining[:total - len(result)])
 
     random.shuffle(result)
     return result[:total]
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
-    print("📡 Загружаю wifi конфиги...")
-    wifi = sample_from_sources(WIFI_SOURCES, 100, 'wifi @nzea_tri_bykvi')
+    # Загружаем wifi источники один раз — используем и для tri_228 и для pc_228
+    print("📡 Загружаю wifi источники...")
+    wifi_cache: dict[str, list[str]] = {}
+    for url in WIFI_SOURCES:
+        wifi_cache[url] = fetch_configs(url)
+
+    print("\n📡 Формирую wifi конфиги (мобилка)...")
+    wifi = sample_from_sources(WIFI_SOURCES, 100, 'wifi @nzea_tri_bykvi', preloaded=wifi_cache)
 
     print("\n📡 Загружаю bypass конфиги...")
     bypass = sample_from_sources(BYPASS_SOURCES, 100, 'обход бс @nzea_tri_bykvi')
 
+    print("\n📡 Формирую PC конфиги...")
+    pc = sample_from_sources(WIFI_SOURCES, 2000, 'wifi @nzea_tri_bykvi', preloaded=wifi_cache)
+
+    # ── tri_228.txt (мобилка: wifi + bypass) ─────────────────────────────────
     output = '\n'.join([
         build_header(), '',
         SEPARATOR_WIFI,
@@ -295,11 +307,19 @@ def main():
         SEPARATOR_BYPASS,
         *bypass,
     ])
-
     with open('tri_228.txt', 'w', encoding='utf-8') as f:
         f.write(output)
 
-    print(f"\n✅ Готово! wifi: {len(wifi)}, bypass: {len(bypass)}")
+    # ── pc_228.txt (только wifi, 2000 конфигов) ───────────────────────────────
+    pc_output = '\n'.join([
+        build_header(), '',
+        SEPARATOR_PC,
+        *pc,
+    ])
+    with open('pc_228.txt', 'w', encoding='utf-8') as f:
+        f.write(pc_output)
+
+    print(f"\n✅ Готово! wifi: {len(wifi)}, bypass: {len(bypass)}, pc: {len(pc)}")
 
 if __name__ == '__main__':
     main()
