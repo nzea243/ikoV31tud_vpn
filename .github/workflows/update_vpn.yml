@@ -31,7 +31,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tri_228.txt
+          git add tri_228.txt pc_228.txt
           if git diff --staged --quiet; then
             echo "Нет изменений."
           else
@@ -40,14 +40,15 @@ jobs:
             git push origin main
           fi
 
-      - name: Push tri_228.txt to GitVerse
+      - name: Push to GitVerse
         run: |
           git clone https://nzea234:${{ secrets.MIRROR_OKAK_67_KVN_BS }}@gitverse.ru/nzea234/ekaterina_nevilikaya228.git gitverse_repo
           cp tri_228.txt gitverse_repo/tri_228.txt
+          cp pc_228.txt gitverse_repo/pc_228.txt
           cd gitverse_repo
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add tri_228.txt
+          git add tri_228.txt pc_228.txt
           if git diff --staged --quiet; then
             echo "Нет изменений на GitVerse."
           else
