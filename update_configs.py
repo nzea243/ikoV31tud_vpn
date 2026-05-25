@@ -5,9 +5,6 @@ import base64
 import re
 from datetime import datetime, timezone
 from urllib.parse import unquote, quote
-import socket
-import time
-from concurrent.futures import ThreadPoolExecutor
 
 # ─── Заголовок файла ──────────────────────────────────────────────────────────
 def build_header():
@@ -202,10 +199,6 @@ def set_remark(config: str, remark: str) -> str:
     return base + '#' + quote(remark, safe='')
 
 def extract_host(config: str) -> str:
-    host, _ = extract_host_port(config)
-    return host
-
-def extract_host_port(config: str) -> tuple[str, int]:
     s = config.split('#', 1)[0]
     if '://' in s:
         s = s.split('://', 1)[1]
@@ -213,27 +206,14 @@ def extract_host_port(config: str) -> tuple[str, int]:
         s = s.split('@', 1)[1]
     s = s.split('?', 1)[0]
     s = s.split('/', 1)[0]
-    
-    port = 443  # Дефолтный порт
-    if s.startswith('['):
-        parts = s.split(']', 1)
-        host = parts[0][1:]
-        if len(parts) > 1 and parts[1].startswith(':'):
-            try:
-                port = int(parts[1].split(':', 1)[1])
-            except ValueError:
-                pass
-    else:
-        if ':' in s:
-            parts = s.split(':', 1)
-            host = parts[0]
-            try:
-                port = int(parts[1])
-            except ValueError:
-                pass
+    if ':' in s:
+        if s.startswith('['):
+            host = s.split(']', 1)[0][1:]
         else:
-            host = s
-    return host.strip(), port
+            host = s.split(':', 1)[0]
+    else:
+        host = s
+    return host.strip()
 
 def fetch_twl_ips() -> set[str]:
     urls = [
@@ -340,17 +320,6 @@ def finalize_configs(configs: list[str], suffix: str) -> list[str]:
         final_list.append(set_remark(cfg, new_remark))
     return final_list
 
-def tcp_ping_config(cfg: str):
-    """Быстрый TCP-пинг хоста конфигурации"""
-    host, port = extract_host_port(cfg)
-    start = time.perf_counter()
-    try:
-        sock = socket.create_connection((host, port), timeout=1.5)
-        sock.close()
-        return cfg, (time.perf_counter() - start) * 1000
-    except Exception:
-        return cfg, None
-
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     print("📥 Загружаю разрешенные IP-адреса из базы TWL...")
@@ -362,81 +331,38 @@ def main():
     for url in WIFI_SOURCES:
         wifi_cache[url] = fetch_configs(url)
 
-    wifi_pools = [preprocess_pool(wifi_cache[url], False, twl_ips) for url in WIFI_SOURCES if wifi_cache[url]]
-    wifi_pools = [p for p in wifi_pools if p]
+    # Полные пулы со всеми протоколами (для ПК)
+    wifi_pools_all = [preprocess_pool(wifi_cache[url], False, twl_ips) for url in WIFI_SOURCES if wifi_cache[url]]
+    wifi_pools_all = [p for p in wifi_pools_all if p]
 
-    print("\n📡 Формирую wifi конфиги (мобилка) с проверкой пинга...")
-    # Берем с запасом 500 штук для пингования
-    wifi_candidates = sample_from_sources(wifi_pools, 500)
-    
-    print(f"  ⚡ Пингую {len(wifi_candidates)} кандидатов в 60 потоков...")
-    pinged_configs = []
-    with ThreadPoolExecutor(max_workers=60) as executor:
-        results = executor.map(tcp_ping_config, wifi_candidates)
-        for cfg, latency in results:
-            if latency is not None and latency < 200:
-                pinged_configs.append((cfg, latency))
+    # Пулы фильтруем, оставляя ТОЛЬКО vless:// для мобилки (wifi / ЧС)
+    wifi_pools_vless = [[cfg for cfg in pool if cfg.startswith('vless://')] for pool in wifi_pools_all]
+    wifi_pools_vless = [p for p in wifi_pools_vless if p]
 
-    print(f"  ✓ Найдено {len(pinged_configs)} живых конфигураций с пингом < 200мс.")
-
-    # Сортируем кандидатов по возрастанию пинга (лучшие вперед)
-    pinged_configs.sort(key=lambda x: x[1])
-
-    # Определяем уникальные страны среди прошедших пинг-тест
-    unique_ccs = set()
-    for cfg, _ in pinged_configs:
-        res = detect_country(get_remark(cfg))
-        if res:
-            unique_ccs.add(res[1])
-
-    # Генерируем случайный лимит (1, 2 или 3) для каждой страны персонально
-    country_limits = {cc: random.randint(1, 3) for cc in unique_ccs}
-    
-    wifi_selected = []
-    country_counts = {}
-
-    # Отбираем топ-50 лучших по пингу с учетом случайных ограничений по странам
-    for cfg, latency in pinged_configs:
-        if len(wifi_selected) >= 50:
-            break
-        res = detect_country(get_remark(cfg))
-        if not res:
-            continue
-        cc = res[1]
-        
-        limit = country_limits.get(cc, 3)
-        current_cnt = country_counts.get(cc, 0)
-        
-        if current_cnt < limit:
-            country_counts[cc] = current_cnt + 1
-            wifi_selected.append(cfg)
-
-    # Сортируем итоговые 50 штук по коду страны, чтобы они шли по порядку группами
-    def get_config_cc(cfg):
-        res = detect_country(get_remark(cfg))
-        return res[1] if res else 'ZZ'
-
-    wifi_selected.sort(key=get_config_cc)
-    wifi_final = finalize_configs(wifi_selected, 'wifi')
+    print("\n📡 Формирую wifi конфиги (мобилка, строго VLESS, 300 штук)...")
+    wifi_sampled = sample_from_sources(wifi_pools_vless, 300)
+    wifi_final = finalize_configs(wifi_sampled, 'wifi')
 
     print("\n📡 Загружаю bypass источники...")
     bypass_pools = []
     for url in BYPASS_SOURCES:
         cfgs = fetch_configs(url)
         if cfgs:
-            valid_p = preprocess_pool(cfgs, True, twl_ips)
+            # Отбираем только vless:// для мобилки (bypass / БС)
+            cfgs_vless = [cfg for cfg in cfgs if cfg.startswith('vless://')]
+            valid_p = preprocess_pool(cfgs_vless, True, twl_ips)
             if valid_p:
                 bypass_pools.append(valid_p)
 
-    print("\n📡 Формирую bypass конфиги...")
+    print("\n📡 Формирую bypass конфиги (строго VLESS, 300 штук)...")
     bypass_sampled = sample_from_sources(bypass_pools, 300)
     bypass_final = finalize_configs(bypass_sampled, 'обход бс')
 
-    print("\n📡 Формирую PC конфиги...")
-    pc_sampled = sample_from_sources(wifi_pools, 2000)
+    print("\n📡 Формирую PC конфиги (все протоколы, 2000 штук)...")
+    pc_sampled = sample_from_sources(wifi_pools_all, 2000)
     pc_final = finalize_configs(pc_sampled, 'wifi')
 
-    # ── bl_228.txt (мобилка: топ 50 быстрых wifi конфигов) ───────────────────
+    # ── bl_228.txt (мобилка: только wifi, 300 конфигов) ───────────────────────
     bl_output = '\n'.join([build_header(), '', SEPARATOR_WIFI, *wifi_final])
     with open('bl_228.txt', 'w', encoding='utf-8') as f:
         f.write(bl_output)
@@ -451,7 +377,7 @@ def main():
     with open('pc_228.txt', 'w', encoding='utf-8') as f:
         f.write(pc_output)
 
-    print(f"\n✅ Готово! bl_228.txt: {len(wifi_final)} (топ-50 быстрых), wl_228.txt: {len(bypass_final)}, pc_228.txt: {len(pc_final)}")
+    print(f"\n✅ Готово! bl_228.txt: {len(wifi_final)} (VLESS), wl_228.txt: {len(bypass_final)} (VLESS), pc_228.txt: {len(pc_final)} (Все протоколы)")
 
 if __name__ == '__main__':
     main()
