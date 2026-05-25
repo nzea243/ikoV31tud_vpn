@@ -4,7 +4,7 @@ import random
 import base64
 import re
 from datetime import datetime, timezone
-from urllib.parse import unquote, quote, urlparse
+from urllib.parse import unquote, quote
 
 # ─── Заголовок файла ──────────────────────────────────────────────────────────
 def build_header():
@@ -71,12 +71,11 @@ BYPASS_SOURCES = [
 ]
 
 VALID_PREFIXES = ('vless://', 'vmess://', 'trojan://', 'ss://', 'ssr://', 'hysteria2://', 'hy2://', 'tuic://')
+IP_RE = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
 
 # ─── База стран ───────────────────────────────────────────────────────────────
 def _flag(cc):
     return ''.join(chr(0x1F1E6 + ord(c) - ord('A')) for c in cc.upper())
-
-COUNTRY_PATTERNS: list[tuple[re.Pattern, str]] = []
 
 _NAMES = [
     ('RU', ['🇷🇺', 'Russia', 'Россия', 'RUS', r'\bRU\b']),
@@ -159,7 +158,7 @@ _NAMES = [
 ]
 
 _FLAG_RE = re.compile(r'[\U0001F1E6-\U0001F1FF]{2}')
-_BUILT_PATTERNS: list[tuple[re.Pattern, str, str]] = []
+_BUILT_PATTERNS = []
 for cc, aliases in _NAMES:
     flag = _flag(cc)
     for alias in aliases:
@@ -199,16 +198,40 @@ def set_remark(config: str, remark: str) -> str:
     base = config.split('#', 1)[0] if '#' in config else config
     return base + '#' + quote(remark, safe='')
 
-def rename_config(config: str, section: str) -> str | None:
-    remark = get_remark(config)
-    result = detect_country(remark)
-    if result is None:
-        return None
-    flag, cc = result
-    is_foreign = (cc != RUSSIA_CC)
-    ai_tag = ' (ai)' if is_foreign else ''
-    new_remark = f"{flag}{ai_tag} {section}"
-    return set_remark(config, new_remark)
+def extract_host(config: str) -> str:
+    s = config.split('#', 1)[0]
+    if '://' in s:
+        s = s.split('://', 1)[1]
+    if '@' in s:
+        s = s.split('@', 1)[1]
+    s = s.split('?', 1)[0]
+    s = s.split('/', 1)[0]
+    if ':' in s:
+        if s.startswith('['):
+            host = s.split(']', 1)[0][1:]
+        else:
+            host = s.split(':', 1)[0]
+    else:
+        host = s
+    return host.strip()
+
+def fetch_twl_ips() -> set[str]:
+    urls = [
+        "https://raw.githubusercontent.com/openlibrecommunity/twl/main/code/scan/out/whitelist_ips.txt",
+        "https://raw.githubusercontent.com/openlibrecommunity/twl/main/code/scan/out/verify/verified.txt"
+    ]
+    ips = set()
+    for url in urls:
+        try:
+            r = requests.get(url, timeout=20)
+            if r.status_code == 200:
+                for line in r.text.splitlines():
+                    ip = line.strip()
+                    if ip:
+                        ips.add(ip)
+        except Exception as e:
+            print(f"  ✗ Ошибка при загрузке TWL {url[-30:]}: {e}")
+    return ips
 
 def fetch_configs(url: str) -> list[str]:
     try:
@@ -231,6 +254,19 @@ def fetch_configs(url: str) -> list[str]:
         print(f"  ✗ {url}: {e}")
         return []
 
+def preprocess_pool(pool: list[str], is_bypass: bool, twl_ips: set[str]) -> list[str]:
+    valid = []
+    for cfg in pool:
+        remark = get_remark(cfg)
+        if detect_country(remark) is None:
+            continue
+        if is_bypass:
+            host = extract_host(cfg)
+            if IP_RE.match(host) and host not in twl_ips:
+                continue
+        valid.append(cfg)
+    return valid
+
 def random_split(total: int, n: int) -> list[int]:
     weights = [random.random() for _ in range(n)]
     s = sum(weights)
@@ -241,85 +277,100 @@ def random_split(total: int, n: int) -> list[int]:
         counts[idx] = max(1, counts[idx] + (1 if diff > 0 else -1))
     return counts
 
-def sample_from_sources(sources: list[str], total: int, section: str,
-                        preloaded: dict[str, list[str]] | None = None) -> list[str]:
-    pools = []
-    for url in sources:
-        if preloaded and url in preloaded:
-            c = preloaded[url]
-        else:
-            c = fetch_configs(url)
-        if c:
-            pools.append(c)
-
+def sample_from_sources(pools: list[list[str]], total: int) -> list[str]:
     if not pools:
         return []
-
     counts = random_split(total, len(pools))
     result = []
-
     for pool, count in zip(pools, counts):
         candidates = random.sample(pool, min(count * 3, len(pool)))
         added = 0
         for cfg in candidates:
             if added >= count:
                 break
-            renamed = rename_config(cfg, section)
-            if renamed is not None:
-                result.append(renamed)
-                added += 1
-
+            result.append(cfg)
+            added += 1
     if len(result) < total:
         all_remaining = []
         for pool in pools:
             for cfg in pool:
-                renamed = rename_config(cfg, section)
-                if renamed is not None and renamed not in result:
-                    all_remaining.append(renamed)
+                if cfg not in result:
+                    all_remaining.append(cfg)
         random.shuffle(all_remaining)
         result.extend(all_remaining[:total - len(result)])
-
     random.shuffle(result)
     return result[:total]
 
+def finalize_configs(configs: list[str], suffix: str) -> list[str]:
+    counts = {}
+    final_list = []
+    for cfg in configs:
+        remark = get_remark(cfg)
+        res = detect_country(remark)
+        if res is None:
+            continue
+        flag, cc = res
+        is_foreign = (cc != RUSSIA_CC)
+        ai_tag = ' (ai)' if is_foreign else ''
+        
+        counts[cc] = counts.get(cc, 0) + 1
+        num_str = f" {counts[cc]}" if counts[cc] > 1 else ""
+        
+        new_remark = f"{flag}{ai_tag} {cc}{num_str} | {suffix}"
+        final_list.append(set_remark(cfg, new_remark))
+    return final_list
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
-    # Загружаем wifi источники один раз — используем и для tri_228 и для pc_228
-    print("📡 Загружаю wifi источники...")
-    wifi_cache: dict[str, list[str]] = {}
+    print("📥 Загружаю разрешенные IP-адреса из базы TWL...")
+    twl_ips = fetch_twl_ips()
+    print(f"  ✓ Найдено {len(twl_ips)} whitelisted IP.")
+
+    print("\n📡 Загружаю wifi источники...")
+    wifi_cache = {}
     for url in WIFI_SOURCES:
         wifi_cache[url] = fetch_configs(url)
 
-    print("\n📡 Формирую wifi конфиги (мобилка)...")
-    wifi = sample_from_sources(WIFI_SOURCES, 100, 'wifi @nzea_tri_bykvi', preloaded=wifi_cache)
+    wifi_pools = [preprocess_pool(wifi_cache[url], False, twl_ips) for url in WIFI_SOURCES if wifi_cache[url]]
+    wifi_pools = [p for p in wifi_pools if p]
 
-    print("\n📡 Загружаю bypass конфиги...")
-    bypass = sample_from_sources(BYPASS_SOURCES, 100, 'обход бс @nzea_tri_bykvi')
+    print("\n📡 Формирую wifi конфиги (мобилка)...")
+    wifi_sampled = sample_from_sources(wifi_pools, 300)
+    wifi_final = finalize_configs(wifi_sampled, 'wifi')
+
+    print("\n📡 Загружаю bypass источники...")
+    bypass_pools = []
+    for url in BYPASS_SOURCES:
+        cfgs = fetch_configs(url)
+        if cfgs:
+            valid_p = preprocess_pool(cfgs, True, twl_ips)
+            if valid_p:
+                bypass_pools.append(valid_p)
+
+    print("\n📡 Формирую bypass конфиги...")
+    bypass_sampled = sample_from_sources(bypass_pools, 300)
+    bypass_final = finalize_configs(bypass_sampled, 'обход бс')
 
     print("\n📡 Формирую PC конфиги...")
-    pc = sample_from_sources(WIFI_SOURCES, 2000, 'wifi @nzea_tri_bykvi', preloaded=wifi_cache)
+    pc_sampled = sample_from_sources(wifi_pools, 2000)
+    pc_final = finalize_configs(pc_sampled, 'wifi')
 
-    # ── tri_228.txt (мобилка: wifi + bypass) ─────────────────────────────────
-    output = '\n'.join([
-        build_header(), '',
-        SEPARATOR_WIFI,
-        *wifi, '',
-        SEPARATOR_BYPASS,
-        *bypass,
-    ])
-    with open('tri_228.txt', 'w', encoding='utf-8') as f:
-        f.write(output)
+    # ── bl_228.txt (мобилка: только wifi, 300 конфигов) ───────────────────────
+    bl_output = '\n'.join([build_header(), '', SEPARATOR_WIFI, *wifi_final])
+    with open('bl_228.txt', 'w', encoding='utf-8') as f:
+        f.write(bl_output)
+
+    # ── wl_228.txt (мобилка: только bypass, 300 конфигов) ─────────────────────
+    wl_output = '\n'.join([build_header(), '', SEPARATOR_BYPASS, *bypass_final])
+    with open('wl_228.txt', 'w', encoding='utf-8') as f:
+        f.write(wl_output)
 
     # ── pc_228.txt (только wifi, 2000 конфигов) ───────────────────────────────
-    pc_output = '\n'.join([
-        build_header(), '',
-        SEPARATOR_PC,
-        *pc,
-    ])
+    pc_output = '\n'.join([build_header(), '', SEPARATOR_PC, *pc_final])
     with open('pc_228.txt', 'w', encoding='utf-8') as f:
         f.write(pc_output)
 
-    print(f"\n✅ Готово! wifi: {len(wifi)}, bypass: {len(bypass)}, pc: {len(pc)}")
+    print(f"\n✅ Готово! bl_228.txt: {len(wifi_final)}, wl_228.txt: {len(bypass_final)}, pc_228.txt: {len(pc_final)}")
 
 if __name__ == '__main__':
     main()
